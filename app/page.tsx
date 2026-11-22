@@ -62,6 +62,7 @@ export default function ChatosApp() {
   const [isListening, setIsListening] = useState(false);
   const [activeSpeakingId, setActiveSpeakingId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('dolphin-llama3');
+  const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -82,9 +83,12 @@ export default function ChatosApp() {
   const speechQueueRef = useRef<string[]>([]);
   const isSpeakingRef = useRef<boolean>(false);
 
-  // Load custom characters from localStorage on start
+  // Load custom characters and API key from localStorage on start
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const savedKey = localStorage.getItem('chatos_api_key');
+      if (savedKey) setApiKey(savedKey);
+
       const savedChars = localStorage.getItem('custom_characters');
       if (savedChars) {
         try {
@@ -388,6 +392,7 @@ Never break character. Never mention the image tag in dialogue.`;
           messages: updatedMessages.map(({ role, content }) => ({ role, content })),
           model: selectedModel,
           systemPrompt: activePrompt,
+          apiKey: apiKey.trim(),
         }),
       });
 
@@ -1399,8 +1404,28 @@ Never break character. Never mention the image tag in dialogue.`;
             </div>
 
             <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1 flex items-center justify-between">
+                <span>Groq API Key (100% Free Cloud LLM)</span>
+                <span className="text-[10px] text-pink-400 font-semibold">Instant High Speed</span>
+              </label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  localStorage.setItem('chatos_api_key', e.target.value);
+                }}
+                placeholder="Paste free Groq key (gsk_...)"
+                className="w-full bg-[#120c12] border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-pink-500 font-mono"
+              />
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Get free key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-pink-400 underline">console.groq.com/keys</a>
+              </p>
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1">
-                Ollama Model Name
+                Local Ollama Model (for offline laptop mode)
               </label>
               <input
                 type="text"

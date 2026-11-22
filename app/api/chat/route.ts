@@ -49,11 +49,12 @@ async function generateImage(prompt: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, systemPrompt, model } = await req.json();
+    const { messages, systemPrompt, model, apiKey } = await req.json();
     const activeSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
-    const groqKey = process.env.GROQ_API_KEY;
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    const providedKey = (apiKey || '').trim();
+    const groqKey = providedKey.startsWith('gsk_') ? providedKey : (process.env.GROQ_API_KEY || (providedKey.length > 20 && !providedKey.startsWith('sk-or-') ? providedKey : null));
+    const openRouterKey = providedKey.startsWith('sk-or-') ? providedKey : process.env.OPENROUTER_API_KEY;
     const ollamaUrl = process.env.OLLAMA_BASE_URL;
 
     let chatEndpoint = '';
@@ -61,11 +62,11 @@ export async function POST(req: NextRequest) {
     let chatModel = '';
 
     // ROUTING:
-    // 1. Groq (Top recommended for Vercel: Llama 3.3 70B, ultra-fast, 100% free)
+    // 1. Groq (Flagship free model: llama-3.1-8b-instant - universally available on all free accounts)
     if (groqKey) {
       chatEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
       chatHeaders['Authorization'] = `Bearer ${groqKey}`;
-      chatModel = 'llama-3.3-70b-versatile';
+      chatModel = 'llama-3.1-8b-instant';
     }
     // 2. OpenRouter Free Endpoints (Llama 3.3 70B Free)
     else if (openRouterKey) {
