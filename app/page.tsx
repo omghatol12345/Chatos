@@ -1403,11 +1403,26 @@ Never break character. Never mention the image tag in dialogue.`;
               </button>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1 flex items-center justify-between">
-                <span>Groq API Key (100% Free Cloud LLM)</span>
-                <span className="text-[10px] text-pink-400 font-semibold">Instant High Speed</span>
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-zinc-300 flex items-center justify-between">
+                <span>Free Cloud AI Key (Gemini or Groq)</span>
+                {apiKey.startsWith('AIzaSy') ? (
+                  <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                    ⚡ Google Gemini (Active)
+                  </span>
+                ) : apiKey.startsWith('gsk_') ? (
+                  <span className="text-[10px] text-pink-400 font-semibold bg-pink-950/60 px-2 py-0.5 rounded border border-pink-800">
+                    🚀 Groq Llama 3 (Active)
+                  </span>
+                ) : apiKey.startsWith('sk-or-') ? (
+                  <span className="text-[10px] text-purple-400 font-semibold bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800">
+                    🌐 OpenRouter (Active)
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-amber-400 font-semibold">100% Free Forever</span>
+                )}
               </label>
+
               <input
                 type="password"
                 value={apiKey}
@@ -1415,17 +1430,52 @@ Never break character. Never mention the image tag in dialogue.`;
                   setApiKey(e.target.value);
                   localStorage.setItem('chatos_api_key', e.target.value);
                 }}
-                placeholder="Paste free Groq key (gsk_...)"
-                className="w-full bg-[#120c12] border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-pink-500 font-mono"
+                placeholder="Paste Google Gemini (AIzaSy...) or Groq (gsk_...) key"
+                className="w-full bg-[#120c12] border border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-pink-500 font-mono"
               />
-              <p className="text-[11px] text-zinc-400 mt-1">
-                Get free key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-pink-400 underline">console.groq.com/keys</a>
-              </p>
+
+              <div className="p-2.5 bg-black/40 border border-zinc-800 rounded-xl text-[11px] space-y-1.5">
+                <div className="flex items-start gap-1.5">
+                  <span className="text-emerald-400 font-bold">1. Recommended:</span>
+                  <div className="text-zinc-300">
+                    <strong>Google Gemini (1-Click, No Card):</strong>
+                    <br />
+                    Go to{' '}
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-pink-400 underline font-medium"
+                    >
+                      aistudio.google.com/app/apikey
+                    </a>
+                    , click <em>Create API Key</em> with your Gmail. Generates fluent, emotional Hinglish!
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-1.5 pt-1 border-t border-zinc-800/80">
+                  <span className="text-pink-400 font-bold">2. Alternative:</span>
+                  <div className="text-zinc-300">
+                    <strong>Groq Llama 3:</strong>
+                    <br />
+                    Go to{' '}
+                    <a
+                      href="https://console.groq.com/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-pink-400 underline font-medium"
+                    >
+                      console.groq.com/keys
+                    </a>
+                    . <em>(Note: Log in with Google; disposable temp-mail accounts get model blocked by Groq)</em>.
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1">
-                Local Ollama Model (for offline laptop mode)
+                Local Ollama Model (for offline laptop mode only)
               </label>
               <input
                 type="text"
@@ -1435,7 +1485,7 @@ Never break character. Never mention the image tag in dialogue.`;
                 className="w-full bg-[#120c12] border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-pink-500"
               />
               <p className="text-[11px] text-zinc-500 mt-1">
-                Must match an installed Ollama model (e.g. <code>dolphin-llama3</code>).
+                Used only when running locally on your laptop with Ollama.
               </p>
             </div>
 

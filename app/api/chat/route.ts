@@ -53,36 +53,95 @@ export async function POST(req: NextRequest) {
     const activeSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
     const providedKey = (apiKey || '').trim();
-    const groqKey = providedKey.startsWith('gsk_') ? providedKey : (process.env.GROQ_API_KEY || (providedKey.length > 20 && !providedKey.startsWith('sk-or-') ? providedKey : null));
-    const openRouterKey = providedKey.startsWith('sk-or-') ? providedKey : process.env.OPENROUTER_API_KEY;
+    const envGroq = process.env.GROQ_API_KEY || '';
+    const envGemini = process.env.GEMINI_API_KEY || '';
+    const envOpenRouter = process.env.OPENROUTER_API_KEY || '';
     const ollamaUrl = process.env.OLLAMA_BASE_URL;
 
     let chatEndpoint = '';
     let chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    let chatModel = '';
+    let candidateModels: string[] = [];
+    let providerName = '';
 
-    // ROUTING:
-    // 1. Groq (Flagship free model: llama-3.1-8b-instant - universally available on all free accounts)
-    if (groqKey) {
+    // PROVIDER RESOLUTION:
+    // 1. Google Gemini (100% Free, highest quality natural Hinglish, 1500 req/day, no credit card)
+    if (providedKey.startsWith('AIzaSy') || envGemini) {
+      const key = providedKey.startsWith('AIzaSy') ? providedKey : envGemini;
+      providerName = 'Google Gemini';
+      chatEndpoint = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+      chatHeaders['Authorization'] = `Bearer ${key}`;
+      candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+    }
+    // 2. Groq (Ultra-fast free inference)
+    else if (providedKey.startsWith('gsk_') || envGroq) {
+      const key = providedKey.startsWith('gsk_') ? providedKey : envGroq;
+      providerName = 'Groq';
       chatEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
-      chatHeaders['Authorization'] = `Bearer ${groqKey}`;
-      chatModel = 'llama-3.1-8b-instant';
+      chatHeaders['Authorization'] = `Bearer ${key}`;
+
+      // Default priority list of Groq models
+      candidateModels = [
+        'llama-3.3-70b-versatile',
+        'llama-3.1-8b-instant',
+        'llama3-70b-8192',
+        'llama3-8b-8192',
+        'qwen/qwen3.8-27b',
+        'gemma2-9b-it',
+        'mixtral-8x7b-32768',
+      ];
+
+      // Dynamically query Groq to see what models this specific account actually has access to!
+      try {
+        const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        if (modelsRes.ok) {
+          const modelsData = await modelsRes.json();
+          const activeIds: string[] = (modelsData.data || [])
+            .map((m: { id: string }) => m.id)
+            .filter((id: string) => !id.includes('whisper') && !id.includes('guard'));
+
+          if (activeIds.length > 0) {
+            // Prioritize matching preferred models, followed by any other text models
+            const matched = candidateModels.filter((id) => activeIds.includes(id));
+            const remaining = activeIds.filter((id) => !candidateModels.includes(id));
+            candidateModels = [...matched, ...remaining];
+          }
+        }
+      } catch (err) {
+        console.warn('Groq dynamic model check failed, using default candidate list:', err);
+      }
     }
-    // 2. OpenRouter Free Endpoints (Llama 3.3 70B Free)
-    else if (openRouterKey) {
+    // 3. OpenRouter Free Endpoints
+    else if (providedKey.startsWith('sk-or-') || envOpenRouter) {
+      const key = providedKey.startsWith('sk-or-') ? providedKey : envOpenRouter;
+      providerName = 'OpenRouter';
       chatEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
-      chatHeaders['Authorization'] = `Bearer ${openRouterKey}`;
-      chatModel = model && model.includes('/') ? model : 'meta-llama/llama-3.3-70b-instruct:free';
+      chatHeaders['Authorization'] = `Bearer ${key}`;
+      candidateModels = ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'meta-llama/llama-3.1-8b-instruct:free'];
     }
-    // 3. Local Ollama (if running on laptop)
+    // 4. Local Ollama (laptop mode)
     else if (ollamaUrl && !process.env.VERCEL) {
+      providerName = 'Local Ollama';
       chatEndpoint = `${ollamaUrl}/v1/chat/completions`;
-      chatModel = model || 'dolphin-llama3';
+      candidateModels = [model || 'dolphin-llama3'];
     }
-    // 4. Fallback Cloud
-    else {
-      chatEndpoint = 'https://text.pollinations.ai/openai/chat/completions';
-      chatModel = 'openai-fast';
+    // 5. Fallback if user pasted an unclassified 20+ char key
+    else if (providedKey.length > 15) {
+      providerName = 'Custom Key (Groq fallback)';
+      chatEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
+      chatHeaders['Authorization'] = `Bearer ${providedKey}`;
+      candidateModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+    }
+
+    if (!chatEndpoint || candidateModels.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error:
+            'No AI provider API key found. Please open Settings (⚙️ top right) and enter a free Google Gemini key (from aistudio.google.com) or a free Groq key (from console.groq.com).',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     const cleanedMessages = [
@@ -97,23 +156,58 @@ STRICT DIALOGUE RULES:
       ...messages,
     ];
 
-    const llmResponse = await fetch(chatEndpoint, {
-      method: 'POST',
-      headers: chatHeaders,
-      body: JSON.stringify({
-        model: chatModel,
-        stream: true,
-        messages: cleanedMessages,
-        temperature: 0.8,
-      }),
-    });
+    // Attempt inference with candidate models
+    let llmResponse: Response | null = null;
+    let lastErrorText = '';
+    let lastStatus = 500;
 
-    if (!llmResponse.ok || !llmResponse.body) {
-      const errText = await llmResponse.text().catch(() => 'Upstream service error');
-      return new Response(
-        JSON.stringify({ error: `AI provider error (${llmResponse.status}): ${errText}` }),
-        { status: 502, headers: { 'Content-Type': 'application/json' } }
-      );
+    for (const modelToTry of candidateModels) {
+      try {
+        const res = await fetch(chatEndpoint, {
+          method: 'POST',
+          headers: chatHeaders,
+          body: JSON.stringify({
+            model: modelToTry,
+            stream: true,
+            messages: cleanedMessages,
+            temperature: 0.8,
+          }),
+        });
+
+        if (res.ok && res.body) {
+          llmResponse = res;
+          break;
+        } else {
+          lastStatus = res.status;
+          lastErrorText = await res.text().catch(() => `HTTP ${res.status}`);
+          console.warn(`[Chatos] Model ${modelToTry} on ${providerName} returned ${res.status}:`, lastErrorText);
+
+          // If unauthorized (401), invalid key; don't keep trying models with invalid key
+          if (res.status === 401) {
+            break;
+          }
+        }
+      } catch (fetchErr) {
+        lastErrorText = (fetchErr as Error).message;
+        console.warn(`[Chatos] Fetch failed for ${modelToTry}:`, fetchErr);
+      }
+    }
+
+    if (!llmResponse || !llmResponse.body) {
+      let friendlyError = `AI provider (${providerName}) error (${lastStatus}): ${lastErrorText}`;
+
+      if (lastErrorText.includes('does not exist or you do not have access') || lastErrorText.includes('model_not_found')) {
+        friendlyError = `Groq Account Restriction: Your Groq account does not have access to any models. This happens when signing up with a temporary or disposable email (temp-mail).
+
+👉 Fix: Sign in to console.groq.com using your regular Google/Gmail account to get a real unrestricted key, or get a 100% Free Google Gemini key from aistudio.google.com and paste it in Settings (⚙️).`;
+      } else if (lastStatus === 401 || lastErrorText.includes('invalid_api_key')) {
+        friendlyError = `Invalid API key for ${providerName}. Please check your key in Settings (⚙️).`;
+      }
+
+      return new Response(JSON.stringify({ error: friendlyError }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const encoder = new TextEncoder();
@@ -125,7 +219,7 @@ STRICT DIALOGUE RULES:
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
 
-        const reader = llmResponse.body!.getReader();
+        const reader = llmResponse!.body!.getReader();
         let sseBuffer = '';
         let textBuffer = '';
         let imagePrompt: string | null = null;
