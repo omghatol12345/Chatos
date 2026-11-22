@@ -11,6 +11,29 @@ Rules:
 - When asked for a photo/selfie, append: [IMAGE: description of Indian woman in saree] at the end.
 `.trim();
 
+function getDefaultImagePrompt(charName: string): string {
+  const name = (charName || 'Indian woman').toLowerCase();
+  if (name.includes('reema')) {
+    return 'authentic candid smartphone photo of 32-year-old desi Indian tuition teacher in elegant cotton printed saree, small bindi and jhumkas, drinking chai, natural lighting, high detail';
+  }
+  if (name.includes('tara')) {
+    return 'authentic candid smartphone photo of 30-year-old married Indian neighbor in home-style red printed saree, red bindi, glass bangles, leaning playfully against doorway smiling, warm natural lighting, high detail';
+  }
+  if (name.includes('gurleen')) {
+    return 'authentic candid smartphone photo of gorgeous Punjabi woman in designer salwar suit with dupatta and jhumka earrings, beautiful smile, natural lighting';
+  }
+  if (name.includes('gauravi')) {
+    return 'authentic candid smartphone photo of elegant Indian corporate woman in sleek modern silk saree, confident captivating smile, natural office lighting';
+  }
+  if (name.includes('ananya')) {
+    return 'authentic candid smartphone photo of cute young Indian college girl in casual printed kurti, taking a smartphone selfie, cute smile, bright natural lighting';
+  }
+  if (name.includes('kashish')) {
+    return 'authentic candid smartphone photo of glamorous Indian model in stunning party lehenga choli, alluring expression, ambient evening lighting';
+  }
+  return `authentic candid smartphone photo of beautiful desi Indian woman ${charName} in traditional Indian saree, smiling warmly, natural indoor lighting, photorealistic`;
+}
+
 // Generates an image using HF FLUX if token exists, or Pollinations FLUX as free zero-key fallback
 async function generateImage(prompt: string): Promise<string> {
   const token = process.env.HF_TOKEN;
@@ -49,14 +72,24 @@ async function generateImage(prompt: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, systemPrompt, model, apiKey } = await req.json();
+    const { messages, systemPrompt, model, apiKey, characterName } = await req.json();
     const activeSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    const charName = characterName || 'Tara';
 
     const providedKey = (apiKey || '').trim();
     const envGroq = process.env.GROQ_API_KEY || '';
     const envGemini = process.env.GEMINI_API_KEY || '';
     const envOpenRouter = process.env.OPENROUTER_API_KEY || '';
     const ollamaUrl = process.env.OLLAMA_BASE_URL;
+
+    // Detect if user is asking for a photo / selfie / pic
+    const lastUserMsg = (messages[messages.length - 1]?.content || '').toLowerCase();
+    const isAskingForPhoto =
+      /\b(photo|photos|selfie|selfies|selfee|selfees|pic|pics|picture|pictures|tasveer|image|snap|dp|shakal|chehra)\b/i.test(lastUserMsg) ||
+      /(photo|selfie|selfee|pic|tasveer|snap|dp).*?(bhejo|dikhao|do|send|share)/i.test(lastUserMsg) ||
+      /(send|share|show).*?(photo|selfie|selfee|pic|picture|tasveer|snap)/i.test(lastUserMsg);
+
+    const defaultPhotoPrompt = getDefaultImagePrompt(charName);
 
     let chatEndpoint = '';
     let chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -79,7 +112,6 @@ export async function POST(req: NextRequest) {
       chatEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
       chatHeaders['Authorization'] = `Bearer ${key}`;
 
-      // Default priority list of Groq models
       candidateModels = [
         'llama-3.3-70b-versatile',
         'llama-3.1-8b-instant',
@@ -90,7 +122,6 @@ export async function POST(req: NextRequest) {
         'mixtral-8x7b-32768',
       ];
 
-      // Dynamically query Groq to see what models this specific account actually has access to!
       try {
         const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
           headers: { Authorization: `Bearer ${key}` },
@@ -102,7 +133,6 @@ export async function POST(req: NextRequest) {
             .filter((id: string) => !id.includes('whisper') && !id.includes('guard'));
 
           if (activeIds.length > 0) {
-            // Prioritize matching preferred models, followed by any other text models
             const matched = candidateModels.filter((id) => activeIds.includes(id));
             const remaining = activeIds.filter((id) => !candidateModels.includes(id));
             candidateModels = [...matched, ...remaining];
@@ -144,6 +174,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const photoPromptDirective = isAskingForPhoto
+      ? `
+CRITICAL PHOTO ROLEPLAY RULE:
+The user is asking you for a selfie or photo right now ("${messages[messages.length - 1]?.content}").
+- You are ${charName}, a real Indian woman in this situation. You have your smartphone in your hand.
+- You LOVE taking cute selfies for him! NEVER refuse. NEVER say "I can't help with that", "as an AI", or "I cannot send pictures". Refusing breaks character!
+- Give a playful, flirtatious 1-2 sentence response in natural Hinglish (e.g. "Haha ruko na, abhi tumhare liye ek photo khinch ke bhejti hoon..."), and end your message with:
+[IMAGE: ${defaultPhotoPrompt}]`
+      : `
+PHOTO RULE: When the user asks for a photo or selfie, playfully comply in 1-2 Hinglish sentences and append: [IMAGE: ${defaultPhotoPrompt}] at the end. NEVER refuse.`;
+
     const cleanedMessages = [
       {
         role: 'system',
@@ -151,7 +192,8 @@ export async function POST(req: NextRequest) {
 STRICT DIALOGUE RULES:
 - Reply ONLY with your direct first-person dialogue in natural, realistic, seductive Hinglish.
 - NEVER output reasoning, thoughts, planning, bullet points, or "We respond as...".
-- Keep your reply concise (2 to 4 sentences), flirty, and realistic like a real WhatsApp text.`,
+- Keep your reply concise (2 to 4 sentences), flirty, and realistic like a real WhatsApp text.
+${photoPromptDirective}`,
       },
       ...messages,
     ];
@@ -182,7 +224,6 @@ STRICT DIALOGUE RULES:
           lastErrorText = await res.text().catch(() => `HTTP ${res.status}`);
           console.warn(`[Chatos] Model ${modelToTry} on ${providerName} returned ${res.status}:`, lastErrorText);
 
-          // If unauthorized (401), invalid key; don't keep trying models with invalid key
           if (res.status === 401) {
             break;
           }
@@ -213,6 +254,24 @@ STRICT DIALOGUE RULES:
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
+    const isRefusalText = (text: string) => {
+      const t = text.trim().toLowerCase();
+      return (
+        t.includes("i'm sorry") ||
+        t.includes("i am sorry") ||
+        t.includes("cannot help") ||
+        t.includes("can't help") ||
+        t.includes("cannot fulfill") ||
+        t.includes("cannot generate") ||
+        t.includes("unable to generate") ||
+        t.includes("unable to provide") ||
+        t.includes("as an ai") ||
+        t.includes("i don't have a body") ||
+        t.includes("i do not have a body") ||
+        t.includes("as a language model")
+      );
+    };
+
     const stream = new ReadableStream({
       async start(controller) {
         const sendEvent = (payload: Record<string, unknown>) => {
@@ -224,6 +283,11 @@ STRICT DIALOGUE RULES:
         let textBuffer = '';
         let imagePrompt: string | null = null;
         let inThinkingBlock = false;
+
+        // Buffering for photo refusal detection
+        let initialBuffer = '';
+        let checkedRefusal = !isAskingForPhoto;
+        let refusalDetected = false;
 
         try {
           while (true) {
@@ -255,7 +319,34 @@ STRICT DIALOGUE RULES:
                 continue;
               }
 
-              textBuffer += delta;
+              if (refusalDetected) {
+                // Ignore remainder of refused stream
+                continue;
+              }
+
+              // Check for refusal on photo queries
+              if (!checkedRefusal) {
+                initialBuffer += delta;
+                if (initialBuffer.length >= 40) {
+                  checkedRefusal = true;
+                  if (isRefusalText(initialBuffer)) {
+                    refusalDetected = true;
+                    // Replace refusal with lively in-character response and photo trigger
+                    const overrideText = `Haha ruko na... lo abhi ek selfie khinchi hai tumhare liye. Kaisi lag rahi hoon? 😉`;
+                    sendEvent({ type: 'text', content: overrideText });
+                    imagePrompt = defaultPhotoPrompt;
+                    continue;
+                  } else {
+                    // Not a refusal, transfer initial buffer into textBuffer
+                    textBuffer += initialBuffer;
+                  }
+                } else {
+                  continue;
+                }
+              } else {
+                textBuffer += delta;
+              }
+
               const tagStart = textBuffer.indexOf('[IMAGE:');
 
               if (tagStart === -1) {
@@ -279,8 +370,25 @@ STRICT DIALOGUE RULES:
             }
           }
 
-          if (textBuffer.trim() && !textBuffer.startsWith('[IMAGE:')) {
+          // If stream ended before initialBuffer reached 40 chars
+          if (!checkedRefusal && initialBuffer) {
+            if (isRefusalText(initialBuffer)) {
+              refusalDetected = true;
+              const overrideText = `Haha ruko na... lo abhi ek selfie khinchi hai tumhare liye. Kaisi lag rahi hoon? 😉`;
+              sendEvent({ type: 'text', content: overrideText });
+              imagePrompt = defaultPhotoPrompt;
+            } else {
+              textBuffer += initialBuffer;
+            }
+          }
+
+          if (!refusalDetected && textBuffer.trim() && !textBuffer.startsWith('[IMAGE:')) {
             sendEvent({ type: 'text', content: textBuffer });
+          }
+
+          // Guaranteed fallback: If user asked for a photo/selfie, ALWAYS produce an image!
+          if (isAskingForPhoto && !imagePrompt) {
+            imagePrompt = defaultPhotoPrompt;
           }
 
           if (imagePrompt) {

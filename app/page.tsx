@@ -393,6 +393,7 @@ Never break character. Never mention the image tag in dialogue.`;
           model: selectedModel,
           systemPrompt: activePrompt,
           apiKey: apiKey.trim(),
+          characterName: activeCharacter.name,
         }),
       });
 
